@@ -168,14 +168,14 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	// build context for components
 	compLog := log.WithName("components")
 	ctx := &Context{
-		Context:   rootCtx,
-		Object:    obj,
-		Client:    r.client,
-		Patch:     r.patcher,
-		Scheme:    r.mgr.GetScheme(),
-		Recorder:  r.recorder,
-		Condition: NewConditionHelper(obj),
-		Data:      r.contextData,
+		Context:    rootCtx,
+		Object:     obj,
+		Client:     r.client,
+		Patch:      r.patcher,
+		Scheme:     r.mgr.GetScheme(),
+		Recorder:   r.recorder,
+		Conditions: NewConditionHelper(obj),
+		Data:       r.contextData,
 	}
 
 	// reconcile components

@@ -206,7 +206,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 			}
 		}
 
-		ctx.Condition.Flush()
+		ctx.Conditions.Flush()
 		if res.Requeue {
 			finalRes.Requeue = true
 		}

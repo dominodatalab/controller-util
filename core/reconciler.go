@@ -9,6 +9,7 @@ import (
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -35,6 +36,7 @@ type Reconciler struct {
 	mgr               ctrl.Manager
 	controllerBuilder *ctrl.Builder
 	apiType           client.Object
+	config            *rest.Config
 	client            client.Client
 	log               logr.Logger
 	webhooksEnabled   bool
@@ -48,8 +50,10 @@ type Reconciler struct {
 }
 
 func NewReconciler(mgr ctrl.Manager) *Reconciler {
+	mgr.GetConfig()
 	return &Reconciler{
 		mgr:               mgr,
+		config:            mgr.GetConfig(),
 		client:            mgr.GetClient(),
 		components:        []*reconcilerComponent{},
 		controllerBuilder: builder.ControllerManagedBy(mgr),
@@ -170,6 +174,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	ctx := &Context{
 		Context:    rootCtx,
 		Object:     obj,
+		Config:     r.config,
 		Client:     r.client,
 		Patch:      r.patcher,
 		Scheme:     r.mgr.GetScheme(),

@@ -14,6 +14,10 @@ type OwnedComponent interface {
 	Kind() client.Object
 }
 
+type InitializerComponent interface {
+	Initialize(*Context, *ctrl.Builder) error
+}
+
 type FinalizerComponent interface {
 	Finalize(*Context) (ctrl.Result, bool, error)
 }

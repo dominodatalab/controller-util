@@ -101,6 +101,7 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 	r.log = ctrl.Log.WithName("controllers").WithName(name)
 	r.recorder = r.mgr.GetEventRecorderFor(fmt.Sprintf("%s-%s", r.name, "controller"))
 
+	// configure finalizer base path and patcher
 	gvk, err := getGvk(r.apiType, r.mgr.GetScheme())
 	if err != nil {
 		return nil, fmt.Errorf("cannot get GVK for object %#v: %w", r.apiType, err)
@@ -112,6 +113,15 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 		r.patcher = NewPatch(gvk)
 	}
 
+	// minimal context for initializer components (if any)
+	initCtx := &Context{
+		Context: context.Background(),
+		Client:  r.client,
+		Scheme:  r.mgr.GetScheme(),
+		Data:    r.contextData,
+	}
+	initLog := r.log.WithName("components")
+
 	components := map[string]Component{}
 	for _, rc := range r.components {
 		orig, ok := components[rc.name]
@@ -121,6 +131,16 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 		rc.finalizerName = path.Join(r.finalizerBaseName, rc.name)
 
 		components[rc.name] = rc.comp
+
+		initComp, ok := rc.comp.(InitializerComponent)
+		if !ok {
+			continue
+		}
+		initCtx.Log = initLog.WithName(rc.name)
+
+		if err = initComp.Initialize(initCtx, r.controllerBuilder); err != nil {
+			return nil, fmt.Errorf("cannot initialize component %s in controller %s: %w", rc.name, r.name, err)
+		}
 	}
 
 	r.controller, err = r.controllerBuilder.Build(r)

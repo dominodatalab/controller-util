@@ -87,6 +87,14 @@ func (r *Reconciler) WithContextData(key string, obj interface{}) *Reconciler {
 	return r
 }
 
+func (r *Reconciler) WithControllerOptions(opts controller.Options) *Reconciler {
+	// this library dynamically builds a reconciler. hence, we do not allow an override here.
+	opts.Reconciler = nil
+
+	r.controllerBuilder.WithOptions(opts)
+	return r
+}
+
 func (r *Reconciler) WithWebhooks() *Reconciler {
 	r.webhooksEnabled = true
 	return r

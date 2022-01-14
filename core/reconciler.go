@@ -82,6 +82,12 @@ func (r *Reconciler) Component(name string, comp Component, opts ...builder.Owns
 	return r
 }
 
+func (r *Reconciler) Named(name string) *Reconciler {
+	r.name = name
+	r.controllerBuilder.Named(name)
+	return r
+}
+
 func (r *Reconciler) WithContextData(key string, obj interface{}) *Reconciler {
 	r.contextData[key] = obj
 	return r

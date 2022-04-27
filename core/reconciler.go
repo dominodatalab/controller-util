@@ -180,10 +180,9 @@ func (r *Reconciler) Complete() error {
 
 func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := r.log.WithValues(r.name, req.NamespacedName)
-
-	// fetch event api object
 	log.Info("Starting reconcile")
 
+	// fetch event api object
 	obj := r.apiType.DeepCopyObject().(client.Object)
 	if err := r.client.Get(rootCtx, req.NamespacedName, obj); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -283,6 +282,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// condense all error messages into one
+	log.Info("Reconciliation complete")
 	return finalRes, utilerrors.NewAggregate(errs)
 }
 

@@ -33,6 +33,7 @@ type reconcilerComponent struct {
 
 type Reconciler struct {
 	name              string
+	resourceName      string
 	mgr               ctrl.Manager
 	controllerBuilder *ctrl.Builder
 	apiType           client.Object
@@ -94,7 +95,7 @@ func (r *Reconciler) WithContextData(key string, obj interface{}) *Reconciler {
 }
 
 func (r *Reconciler) WithControllerOptions(opts controller.Options) *Reconciler {
-	// this library dynamically builds a reconciler. hence, we do not allow an override here.
+	// this library dynamically builds a reconciler, hence, we do not allow an override here
 	opts.Reconciler = nil
 
 	r.controllerBuilder.WithOptions(opts)
@@ -115,11 +116,15 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 	r.log = ctrl.Log.WithName("controller").WithName(name)
 	r.recorder = r.mgr.GetEventRecorderFor(fmt.Sprintf("%s-%s", r.name, "controller"))
 
-	// configure finalizer base path and patcher
 	gvk, err := getGvk(r.apiType, r.mgr.GetScheme())
 	if err != nil {
 		return nil, fmt.Errorf("cannot get GVK for object %#v: %w", r.apiType, err)
 	}
+
+	// resource name should reference api type regardless of controller name
+	r.resourceName = strings.ToLower(gvk.Kind)
+
+	// configure finalizer base path and patcher
 	if r.finalizerBaseName == "" {
 		r.finalizerBaseName = fmt.Sprintf("%s.%s/", name, gvk.Group)
 	}
@@ -179,7 +184,7 @@ func (r *Reconciler) Complete() error {
 }
 
 func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := r.log.WithValues(r.name, req.NamespacedName)
+	log := r.log.WithValues(r.resourceName, req.NamespacedName)
 	log.Info("Starting reconcile")
 
 	// fetch event api object

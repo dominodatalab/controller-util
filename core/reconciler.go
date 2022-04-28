@@ -112,7 +112,7 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 		return nil, fmt.Errorf("cannot compute controller name: %w", err)
 	}
 	r.name = name
-	r.log = ctrl.Log.WithName("controllers").WithName(name)
+	r.log = ctrl.Log.WithName("controller").WithName(name)
 	r.recorder = r.mgr.GetEventRecorderFor(fmt.Sprintf("%s-%s", r.name, "controller"))
 
 	// configure finalizer base path and patcher
@@ -134,7 +134,7 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 		Scheme:  r.mgr.GetScheme(),
 		Data:    r.contextData,
 	}
-	initLog := r.log.WithName("components")
+	initLog := r.log.WithName("component")
 
 	components := map[string]Component{}
 	for _, rc := range r.components {
@@ -203,7 +203,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// build context for components
-	compLog := log.WithName("components")
+	compLog := log.WithName("component")
 	ctx := &Context{
 		Context:    rootCtx,
 		Object:     obj,

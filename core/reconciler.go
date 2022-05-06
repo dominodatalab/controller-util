@@ -21,7 +21,7 @@ import (
 
 var getGvk = apiutil.GVKForObject
 
-const skipReconcileAnnotation = "controller-util.dominodatalab.com/skip-reconcile"
+const SkipReconcileAnnotation = "controller-util.dominodatalab.com/skip-reconcile"
 
 type reconcilerComponent struct {
 	name string
@@ -40,6 +40,7 @@ type Reconciler struct {
 	config            *rest.Config
 	client            client.Client
 	log               logr.Logger
+	abortNotFound     bool
 	webhooksEnabled   bool
 	finalizerBaseName string
 
@@ -51,7 +52,6 @@ type Reconciler struct {
 }
 
 func NewReconciler(mgr ctrl.Manager) *Reconciler {
-	mgr.GetConfig()
 	return &Reconciler{
 		mgr:               mgr,
 		config:            mgr.GetConfig(),
@@ -59,6 +59,7 @@ func NewReconciler(mgr ctrl.Manager) *Reconciler {
 		components:        []*reconcilerComponent{},
 		controllerBuilder: builder.ControllerManagedBy(mgr),
 		contextData:       ContextData{},
+		abortNotFound:     true,
 	}
 }
 
@@ -86,6 +87,11 @@ func (r *Reconciler) Component(name string, comp Component, opts ...builder.Owns
 func (r *Reconciler) Named(name string) *Reconciler {
 	r.name = name
 	r.controllerBuilder.Named(name)
+	return r
+}
+
+func (r *Reconciler) ReconcileNotFound() *Reconciler {
+	r.abortNotFound = false
 	return r
 }
 
@@ -190,18 +196,23 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	// fetch event api object
 	obj := r.apiType.DeepCopyObject().(client.Object)
 	if err := r.client.Get(rootCtx, req.NamespacedName, obj); err != nil {
-		if apierrors.IsNotFound(err) {
+		if !apierrors.IsNotFound(err) {
+			log.Error(err, "Failed to fetch reconcile object")
+			return ctrl.Result{}, err
+		}
+
+		if r.abortNotFound {
 			log.Info("Aborting reconcile, object not found (assuming it was deleted)")
 			return ctrl.Result{}, nil
 		}
 
-		log.Error(err, "Failed to fetch reconcile object")
-		return ctrl.Result{}, err
+		obj.SetName(req.Name)
+		obj.SetNamespace(req.Namespace)
 	}
 	cleanObj := obj.DeepCopyObject().(client.Object)
 
 	// skip reconcile when annotated
-	skip, ok := obj.GetAnnotations()[skipReconcileAnnotation]
+	skip, ok := obj.GetAnnotations()[SkipReconcileAnnotation]
 	if ok && skip == "true" {
 		log.Info("Skipping reconcile due to annotation")
 		return ctrl.Result{}, nil
@@ -262,28 +273,30 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	// patch metadata and status when changes occur
-	currentMeta := r.apiType.DeepCopyObject().(client.Object)
-	currentMeta.SetName(ctx.Object.GetName())
-	currentMeta.SetNamespace(ctx.Object.GetNamespace())
-	currentMeta.SetLabels(ctx.Object.GetLabels())
-	currentMeta.SetAnnotations(ctx.Object.GetAnnotations())
-	currentMeta.SetFinalizers(ctx.Object.GetFinalizers())
+	if !r.abortNotFound {
+		// patch metadata and status when changes occur
+		currentMeta := r.apiType.DeepCopyObject().(client.Object)
+		currentMeta.SetName(ctx.Object.GetName())
+		currentMeta.SetNamespace(ctx.Object.GetNamespace())
+		currentMeta.SetLabels(ctx.Object.GetLabels())
+		currentMeta.SetAnnotations(ctx.Object.GetAnnotations())
+		currentMeta.SetFinalizers(ctx.Object.GetFinalizers())
 
-	cleanMeta := r.apiType.DeepCopyObject().(client.Object)
-	cleanMeta.SetName(cleanObj.GetName())
-	cleanMeta.SetNamespace(cleanObj.GetNamespace())
-	cleanMeta.SetLabels(cleanObj.GetLabels())
-	cleanMeta.SetAnnotations(cleanObj.GetAnnotations())
-	cleanMeta.SetFinalizers(cleanObj.GetFinalizers())
+		cleanMeta := r.apiType.DeepCopyObject().(client.Object)
+		cleanMeta.SetName(cleanObj.GetName())
+		cleanMeta.SetNamespace(cleanObj.GetNamespace())
+		cleanMeta.SetLabels(cleanObj.GetLabels())
+		cleanMeta.SetAnnotations(cleanObj.GetAnnotations())
+		cleanMeta.SetFinalizers(cleanObj.GetFinalizers())
 
-	patchOpts := &client.PatchOptions{FieldManager: r.name}
+		patchOpts := &client.PatchOptions{FieldManager: r.name}
 
-	if err := r.client.Patch(ctx, currentMeta, client.MergeFrom(cleanMeta), patchOpts); err != nil {
-		return ctrl.Result{}, fmt.Errorf("error patching metadata: %w", err)
-	}
-	if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj), patchOpts); err != nil {
-		return ctrl.Result{}, fmt.Errorf("error patching status: %w", err)
+		if err := r.client.Patch(ctx, currentMeta, client.MergeFrom(cleanMeta), patchOpts); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error patching metadata: %w", err)
+		}
+		if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj), patchOpts); err != nil {
+			return ctrl.Result{}, fmt.Errorf("error patching status: %w", err)
+		}
 	}
 
 	// condense all error messages into one

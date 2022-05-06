@@ -273,7 +273,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	if !r.abortNotFound {
+	if r.abortNotFound {
 		// patch metadata and status when changes occur
 		currentMeta := r.apiType.DeepCopyObject().(client.Object)
 		currentMeta.SetName(ctx.Object.GetName())

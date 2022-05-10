@@ -273,30 +273,29 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 		}
 	}
 
-	if r.abortNotFound {
-		// patch metadata and status when changes occur
-		currentMeta := r.apiType.DeepCopyObject().(client.Object)
-		currentMeta.SetName(ctx.Object.GetName())
-		currentMeta.SetNamespace(ctx.Object.GetNamespace())
-		currentMeta.SetLabels(ctx.Object.GetLabels())
-		currentMeta.SetAnnotations(ctx.Object.GetAnnotations())
-		currentMeta.SetFinalizers(ctx.Object.GetFinalizers())
+	// patch metadata and status when changes occur
+	currentMeta := r.apiType.DeepCopyObject().(client.Object)
+	currentMeta.SetName(ctx.Object.GetName())
+	currentMeta.SetNamespace(ctx.Object.GetNamespace())
+	currentMeta.SetLabels(ctx.Object.GetLabels())
+	currentMeta.SetAnnotations(ctx.Object.GetAnnotations())
+	currentMeta.SetFinalizers(ctx.Object.GetFinalizers())
 
-		cleanMeta := r.apiType.DeepCopyObject().(client.Object)
-		cleanMeta.SetName(cleanObj.GetName())
-		cleanMeta.SetNamespace(cleanObj.GetNamespace())
-		cleanMeta.SetLabels(cleanObj.GetLabels())
-		cleanMeta.SetAnnotations(cleanObj.GetAnnotations())
-		cleanMeta.SetFinalizers(cleanObj.GetFinalizers())
+	cleanMeta := r.apiType.DeepCopyObject().(client.Object)
+	cleanMeta.SetName(cleanObj.GetName())
+	cleanMeta.SetNamespace(cleanObj.GetNamespace())
+	cleanMeta.SetLabels(cleanObj.GetLabels())
+	cleanMeta.SetAnnotations(cleanObj.GetAnnotations())
+	cleanMeta.SetFinalizers(cleanObj.GetFinalizers())
 
-		patchOpts := &client.PatchOptions{FieldManager: r.name}
+	patchOpts := &client.PatchOptions{FieldManager: r.name}
 
-		if err := r.client.Patch(ctx, currentMeta, client.MergeFrom(cleanMeta), patchOpts); err != nil {
-			return ctrl.Result{}, fmt.Errorf("error patching metadata: %w", err)
-		}
-		if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj), patchOpts); err != nil {
-			return ctrl.Result{}, fmt.Errorf("error patching status: %w", err)
-		}
+	// ignore NotFound errors when patching object/status since the object may already be deleted
+	if err := r.client.Patch(ctx, currentMeta, client.MergeFrom(cleanMeta), patchOpts); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("error patching metadata: %w", err)
+	}
+	if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj), patchOpts); err != nil && !apierrors.IsNotFound(err) {
+		return ctrl.Result{}, fmt.Errorf("error patching status: %w", err)
 	}
 
 	// condense all error messages into one

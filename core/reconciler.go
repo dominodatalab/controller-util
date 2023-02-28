@@ -294,7 +294,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	if err := r.client.Patch(ctx, currentMeta, client.MergeFrom(cleanMeta), patchOpts); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("error patching metadata: %w", err)
 	}
-	if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj), patchOpts); err != nil && !apierrors.IsNotFound(err) {
+	if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj)); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("error patching status: %w", err)
 	}
 

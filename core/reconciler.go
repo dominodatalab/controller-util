@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
 var getGvk = apiutil.GVKForObject
@@ -92,6 +93,11 @@ func (r *Reconciler) Named(name string) *Reconciler {
 
 func (r *Reconciler) ReconcileNotFound() *Reconciler {
 	r.abortNotFound = false
+	return r
+}
+
+func (r *Reconciler) Watches(apiType client.Object, eventHandler handler.EventHandler, opts ...builder.WatchesOption) *Reconciler {
+	r.controllerBuilder = r.controllerBuilder.Watches(apiType, eventHandler, opts...)
 	return r
 }
 

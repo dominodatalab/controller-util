@@ -44,6 +44,7 @@ type Reconciler struct {
 	abortNotFound     bool
 	webhooksEnabled   bool
 	finalizerBaseName string
+	verboseLogging    bool
 
 	patcher     *Patch
 	recorder    record.EventRecorder
@@ -61,6 +62,7 @@ func NewReconciler(mgr ctrl.Manager) *Reconciler {
 		controllerBuilder: builder.ControllerManagedBy(mgr),
 		contextData:       ContextData{},
 		abortNotFound:     true,
+		verboseLogging:    true,
 	}
 }
 
@@ -93,6 +95,11 @@ func (r *Reconciler) Named(name string) *Reconciler {
 
 func (r *Reconciler) ReconcileNotFound() *Reconciler {
 	r.abortNotFound = false
+	return r
+}
+
+func (r *Reconciler) ReduceReconcileLogging() *Reconciler {
+	r.verboseLogging = false
 	return r
 }
 
@@ -248,20 +255,27 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 		ctx.Log = compLog.WithName(rc.name)
 
 		if ctx.Object.GetDeletionTimestamp().IsZero() {
-			log.Info("Reconciling component", "component", rc.name)
+			if r.verboseLogging {
+				log.Info("Reconciling component", "component", rc.name)
+			}
 			res, err = rc.comp.Reconcile(ctx)
 
 			if rc.finalizer != nil && !controllerutil.ContainsFinalizer(ctx.Object, rc.finalizerName) {
-				log.Info("Registering finalizer", "component", rc.name)
+				if r.verboseLogging {
+					log.Info("Registering finalizer", "component", rc.name)
+				}
 				controllerutil.AddFinalizer(ctx.Object, rc.finalizerName)
 			}
 		} else if rc.finalizer != nil && controllerutil.ContainsFinalizer(ctx.Object, rc.finalizerName) {
-			log.Info("Finalizing component", "component", rc.name)
-
+			if r.verboseLogging {
+				log.Info("Finalizing component", "component", rc.name)
+			}
 			var done bool
 			res, done, err = rc.finalizer.Finalize(ctx)
 			if done {
-				log.Info("Removing finalizer", "component", rc.name)
+				if r.verboseLogging {
+					log.Info("Removing finalizer", "component", rc.name)
+				}
 				controllerutil.RemoveFinalizer(ctx.Object, rc.finalizerName)
 			}
 		}

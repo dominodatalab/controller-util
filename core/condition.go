@@ -76,37 +76,54 @@ func (h *conditionHelper) SetfUnknown(conditionType string, reason, message stri
 }
 
 func SetStatusCondition(conditions *[]metav1.Condition, newCondition metav1.Condition) {
-	existing := FindStatusCondition(*conditions, newCondition.Type)
+	// Find the condition index if it exists
+	index, exists := FindStatusCondition(*conditions, newCondition.Type)
 
-	if existing == nil {
+	if !exists {
+		// Add new condition
 		if newCondition.LastTransitionTime.IsZero() {
 			newCondition.LastTransitionTime = metav1.NewTime(time.Now())
 		}
-
 		*conditions = append(*conditions, newCondition)
 		return
 	}
 
-	if existing.Status != newCondition.Status {
-		existing.Status = newCondition.Status
+	// Update existing condition
+	existing := (*conditions)[index]
 
+	// Create updated condition with all fields properly set
+	updatedCondition := metav1.Condition{
+		Type:               existing.Type,
+		Status:             newCondition.Status,
+		Reason:             newCondition.Reason,
+		Message:            newCondition.Message,
+		LastTransitionTime: existing.LastTransitionTime,
+		ObservedGeneration: newCondition.ObservedGeneration,
+	}
+
+	// Update LastTransitionTime if status changes
+	if existing.Status != newCondition.Status {
 		if !newCondition.LastTransitionTime.IsZero() {
-			existing.LastTransitionTime = newCondition.LastTransitionTime
+			updatedCondition.LastTransitionTime = newCondition.LastTransitionTime
 		} else {
-			existing.LastTransitionTime = metav1.NewTime(time.Now())
+			updatedCondition.LastTransitionTime = metav1.NewTime(time.Now())
 		}
 	}
 
-	existing.Reason = newCondition.Reason
-	existing.Message = newCondition.Message
+	// Preserve ObservedGeneration if not set in new condition
+	if newCondition.ObservedGeneration == 0 {
+		updatedCondition.ObservedGeneration = existing.ObservedGeneration
+	}
+
+	// Replace the condition in the slice
+	(*conditions)[index] = updatedCondition
 }
 
-func FindStatusCondition(conditions []metav1.Condition, conditionType string) *metav1.Condition {
-	for _, cond := range conditions {
+func FindStatusCondition(conditions []metav1.Condition, conditionType string) (int, bool) {
+	for i, cond := range conditions {
 		if cond.Type == conditionType {
-			return &cond
+			return i, true
 		}
 	}
-
-	return nil
+	return -1, false
 }

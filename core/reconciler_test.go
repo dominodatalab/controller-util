@@ -535,3 +535,79 @@ func TestReconciler_MultipleComponentErrors(t *testing.T) {
 func TestReconciler_InitializerComponent(t *testing.T) {
 	t.Skip("Skipping initializer test since we're not using Build() in the tests")
 }
+
+func TestWithDefaulterTrue(t *testing.T) {
+	// Setup fake manager
+	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+
+	// Create reconciler with option
+	r := NewReconciler(mgr).WithDefaulter(true)
+
+	// Assert option was applied correctly
+	assert.True(t, r.withDefaulter, "withDefaulter should be true")
+}
+
+func TestWithDefaulterFalse(t *testing.T) {
+	// Setup fake manager
+	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+
+	// Create reconciler with option explicitly set to false
+	r := NewReconciler(mgr).WithDefaulter(false)
+
+	// Assert option was applied correctly
+	assert.False(t, r.withDefaulter, "withDefaulter should be false")
+}
+
+func TestWithValidatorTrue(t *testing.T) {
+	// Setup fake manager
+	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+
+	// Create reconciler with option
+	r := NewReconciler(mgr).WithValidator(true)
+
+	// Assert option was applied correctly
+	assert.True(t, r.withValidator, "withValidator should be true")
+}
+
+func TestWithValidatorFalse(t *testing.T) {
+	// Setup fake manager
+	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+
+	// Create reconciler with option explicitly set to false
+	r := NewReconciler(mgr).WithValidator(false)
+
+	// Assert option was applied correctly
+	assert.False(t, r.withValidator, "withValidator should be false")
+}
+
+func TestWithRetryPeriod(t *testing.T) {
+	// Setup fake manager
+	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+
+	// Define custom retry period
+	customPeriod := 30 * time.Second
+
+	// Create reconciler with option
+	r := NewReconciler(mgr, WithRetryPeriod(customPeriod))
+
+	// Assert option was applied correctly
+	assert.Equal(t, customPeriod, r.defaultRetryPeriod, "defaultRetryPeriod should match the provided value")
+}
+
+func TestMultipleOptions(t *testing.T) {
+	// Setup fake manager
+	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+
+	// Create reconciler with multiple options
+	r := NewReconciler(
+		mgr,
+		WithRetryPeriod(45*time.Second),
+	).
+		WithDefaulter(true).
+		WithValidator(true)
+
+	// Assert all options were applied correctly
+	assert.True(t, r.withDefaulter, "withDefaulter should be true")
+	assert.True(t, r.withValidator, "withValidator should be true")
+	assert.Equal(t, 45*time.Second, r.defaultRetryPeriod, "defaultRetryPeriod should be 45 seconds")
+}

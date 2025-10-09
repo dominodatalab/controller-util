@@ -12,19 +12,19 @@ type ConditionObject interface {
 	GetConditions() *[]metav1.Condition
 }
 
-type conditionHelper struct {
+type ConditionHelper struct {
 	obj     client.Object
 	pending map[string]metav1.Condition
 }
 
-func NewConditionHelper(obj client.Object) *conditionHelper {
-	return &conditionHelper{
+func NewConditionHelper(obj client.Object) *ConditionHelper {
+	return &ConditionHelper{
 		obj:     obj,
 		pending: map[string]metav1.Condition{},
 	}
 }
 
-func (h *conditionHelper) Flush() error {
+func (h *ConditionHelper) Flush() error {
 	// NOTE: what do we do if obj does not adhere to interface, assuming they have not conditions?
 	condObj, ok := h.obj.(ConditionObject)
 	if !ok {
@@ -39,14 +39,16 @@ func (h *conditionHelper) Flush() error {
 	return nil
 }
 
-func (h *conditionHelper) SetCondition(cond metav1.Condition) {
+func (h *ConditionHelper) SetCondition(cond metav1.Condition) {
 	if cond.ObservedGeneration == 0 {
 		cond.ObservedGeneration = h.obj.GetGeneration()
 	}
 	h.pending[cond.Type] = cond
 }
 
-func (h *conditionHelper) Set(conditionType string, status metav1.ConditionStatus, reason, message string) {
+func (h *ConditionHelper) Set(
+	conditionType string, status metav1.ConditionStatus, reason, message string,
+) {
 	h.SetCondition(metav1.Condition{
 		Type:    conditionType,
 		Status:  status,
@@ -55,23 +57,25 @@ func (h *conditionHelper) Set(conditionType string, status metav1.ConditionStatu
 	})
 }
 
-func (h *conditionHelper) Setf(conditionType string, status metav1.ConditionStatus, reason, message string, args ...interface{}) {
+func (h *ConditionHelper) Setf(
+	conditionType string, status metav1.ConditionStatus, reason, message string, args ...interface{},
+) {
 	h.Set(conditionType, status, reason, fmt.Sprintf(message, args...))
 }
 
-func (h *conditionHelper) SetFalse(conditionType string, reason, message string) {
+func (h *ConditionHelper) SetFalse(conditionType string, reason, message string) {
 	h.Set(conditionType, metav1.ConditionFalse, reason, message)
 }
 
-func (h *conditionHelper) SetTrue(conditionType string, reason, message string) {
+func (h *ConditionHelper) SetTrue(conditionType string, reason, message string) {
 	h.Set(conditionType, metav1.ConditionTrue, reason, message)
 }
 
-func (h *conditionHelper) SetUnknown(conditionType string, reason, message string) {
+func (h *ConditionHelper) SetUnknown(conditionType string, reason, message string) {
 	h.Set(conditionType, metav1.ConditionUnknown, reason, message)
 }
 
-func (h *conditionHelper) SetfUnknown(conditionType string, reason, message string, args ...interface{}) {
+func (h *ConditionHelper) SetfUnknown(conditionType string, reason, message string, args ...interface{}) {
 	h.Setf(conditionType, metav1.ConditionUnknown, reason, message, args...)
 }
 

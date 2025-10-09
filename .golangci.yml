@@ -1,0 +1,82 @@
+version: "2"
+run:
+  tests: false
+linters:
+  default: all
+  disable:
+    - containedctx
+    - copyloopvar
+    - cyclop
+    - err113
+    - exhaustive
+    - exhaustruct
+    - forbidigo
+    - forcetypeassert
+    - gochecknoglobals
+    - gochecknoinits
+    - gocognit
+    - godot
+    - godox
+    - gosec
+    - govet
+    - ireturn
+    - mnd
+    - nestif
+    - nlreturn
+    - noinlineerr
+    - nonamedreturns
+    - nosprintfhostport
+    - perfsprint
+    - prealloc
+    - tagliatelle
+    - varnamelen
+    - wrapcheck
+    - wsl
+    - wsl_v5
+  settings:
+    depguard:
+      rules:
+        main:
+          files:
+            - '!**/*_a _file.go'
+          deny:
+            - pkg: github.com/sirupsen/logrus
+              desc: not allowed
+            - pkg: github.com/pkg/errors
+              desc: Should be replaced by standard lib errors package
+    errorlint:
+      comparison: false
+    funlen:
+      lines: 200
+      statements: 100
+    gosec:
+      excludes:
+        - G306
+    lll:
+      line-length: 120
+    nakedret:
+      max-func-lines: 35
+    tagalign:
+      align: false
+      sort: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - zz_generated.*
+      - third_party$
+      - builtin$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - zz_generated.*
+      - third_party$
+      - builtin$

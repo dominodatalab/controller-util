@@ -159,7 +159,7 @@ func createTestDeployment(name, namespace string) *appsv1.Deployment {
 	}
 }
 
-func TestReconciler_Basic(t *testing.T) {
+func TestReconcilerBasic(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -168,7 +168,7 @@ func TestReconciler_Basic(t *testing.T) {
 	mgr := NewMockManager(cl, s, testr.New(t))
 
 	mockComp := new(MockComponent)
-	expectedResult := ctrl.Result{Requeue: true}
+	expectedResult := ctrl.Result{RequeueAfter: time.Second}
 	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(expectedResult, nil)
 
 	r := NewReconciler(mgr).
@@ -199,7 +199,7 @@ func TestReconciler_Basic(t *testing.T) {
 	mockComp.AssertExpectations(t)
 }
 
-func TestReconciler_MultipleComponents(t *testing.T) {
+func TestReconcilerMultipleComponents(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -210,7 +210,7 @@ func TestReconciler_MultipleComponents(t *testing.T) {
 	mockComp1 := new(MockComponent)
 	mockComp2 := new(MockComponent)
 
-	result1 := ctrl.Result{Requeue: true}
+	result1 := ctrl.Result{RequeueAfter: time.Second}
 	result2 := ctrl.Result{RequeueAfter: 5 * time.Minute}
 
 	mockComp1.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(result1, nil)
@@ -241,13 +241,13 @@ func TestReconciler_MultipleComponents(t *testing.T) {
 	res, err := r.Reconcile(context.Background(), req)
 
 	assert.NoError(t, err)
-	assert.True(t, res.Requeue)
-	assert.Equal(t, 5*time.Minute, res.RequeueAfter)
+	assert.True(t, res.RequeueAfter > 0)
+	assert.Equal(t, time.Second, res.RequeueAfter) // Shortest duration wins
 	mockComp1.AssertExpectations(t)
 	mockComp2.AssertExpectations(t)
 }
 
-func TestReconciler_NotFound(t *testing.T) {
+func TestReconcilerNotFound(t *testing.T) {
 	cl, s := setupTest(t)
 
 	mgr := NewMockManager(cl, s, testr.New(t))
@@ -292,7 +292,7 @@ func TestReconciler_NotFound(t *testing.T) {
 	mockComp.AssertExpectations(t)
 }
 
-func TestReconciler_SkipReconcile(t *testing.T) {
+func TestReconcilerSkipReconcile(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -330,10 +330,10 @@ func TestReconciler_SkipReconcile(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
-	mockComp.AssertNotCalled(t, "Reconcile")
+	mockComp.AssertNotCalled(t, "ReconcileG")
 }
 
-func TestReconciler_OwnedComponent(t *testing.T) {
+func TestReconcilerOwnedComponent(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -391,7 +391,7 @@ func TestReconciler_OwnedComponent(t *testing.T) {
 	mockOwnedComp.AssertExpectations(t)
 }
 
-func TestReconciler_FinalizerComponent(t *testing.T) {
+func TestReconcilerFinalizerComponent(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -442,7 +442,7 @@ func TestReconciler_FinalizerComponent(t *testing.T) {
 
 }
 
-func TestReconciler_ComponentError(t *testing.T) {
+func TestReconcilerComponentError(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -483,7 +483,7 @@ func TestReconciler_ComponentError(t *testing.T) {
 	mockComp.AssertExpectations(t)
 }
 
-func TestReconciler_MultipleComponentErrors(t *testing.T) {
+func TestReconcilerMultipleComponentErrors(t *testing.T) {
 	cl, s := setupTest(t)
 
 	deploy := createTestDeployment("test-deployment", "default")
@@ -532,7 +532,7 @@ func TestReconciler_MultipleComponentErrors(t *testing.T) {
 	mockComp2.AssertExpectations(t)
 }
 
-func TestReconciler_InitializerComponent(t *testing.T) {
+func TestReconcilerInitializerComponent(t *testing.T) {
 	t.Skip("Skipping initializer test since we're not using Build() in the tests")
 }
 

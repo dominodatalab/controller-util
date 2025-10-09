@@ -180,7 +180,11 @@ func (r *Reconciler) ReduceReconcileLogging() *Reconciler {
 	return r
 }
 
-func (r *Reconciler) Watches(apiType client.Object, eventHandler handler.EventHandler, opts ...builder.WatchesOption) *Reconciler {
+func (r *Reconciler) Watches(
+	apiType client.Object,
+	eventHandler handler.EventHandler,
+	opts ...builder.WatchesOption,
+) *Reconciler {
 	r.controllerBuilder = r.controllerBuilder.Watches(apiType, eventHandler, opts...)
 	return r
 }
@@ -312,8 +316,7 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 	cleanObj := obj.DeepCopyObject().(client.Object)
 
 	// skip reconcile when annotated
-	skip, ok := obj.GetAnnotations()[SkipReconcileAnnotation]
-	if ok && skip == "true" {
+	if skip, ok := obj.GetAnnotations()[SkipReconcileAnnotation]; ok && skip == "true" {
 		log.Info("Skipping reconcile due to annotation")
 		return ctrl.Result{}, nil
 	}
@@ -332,13 +335,14 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 		Data:       r.contextData,
 	}
 
-	// reconcile components
 	var finalRes ctrl.Result
 	var errs []error
-	for _, rc := range r.components {
-		res := ctrl.Result{}
-		var err error
 
+	for _, rc := range r.components {
+		var (
+			res ctrl.Result
+			err error
+		)
 		ctx.Log = compLog.WithName(rc.name)
 
 		if ctx.Object.GetDeletionTimestamp().IsZero() {
@@ -368,12 +372,18 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 		}
 
 		ctx.Conditions.Flush()
-		if res.Requeue {
-			finalRes.Requeue = true
+
+		// Convert deprecated Requeue to RequeueAfter using retry period
+		if res.RequeueAfter == 0 {
+			res.RequeueAfter = r.defaultRetryPeriod
 		}
-		if res.RequeueAfter != 0 && (finalRes.RequeueAfter == 0 || finalRes.RequeueAfter > res.RequeueAfter) {
-			finalRes.RequeueAfter = res.RequeueAfter
+		// Aggregate RequeueAfter (use shortest non-zero duration)
+		if res.RequeueAfter > 0 {
+			if finalRes.RequeueAfter == 0 || finalRes.RequeueAfter > res.RequeueAfter {
+				finalRes.RequeueAfter = res.RequeueAfter
+			}
 		}
+
 		if err != nil {
 			log.Error(err, "Component reconciliation failed", "component", rc.name)
 			errs = append(errs, err)
@@ -397,15 +407,22 @@ func (r *Reconciler) Reconcile(rootCtx context.Context, req ctrl.Request) (ctrl.
 
 	patchOpts := &client.PatchOptions{FieldManager: r.name}
 
-	// ignore NotFound errors when patching object/status since the object may already be deleted
-	if err := r.client.Patch(ctx, currentMeta, client.MergeFrom(cleanMeta), patchOpts); err != nil && !apierrors.IsNotFound(err) {
+	// Use rootCtx instead of ctx.Context to maintain proper context inheritance
+	if err := r.client.Patch(
+		rootCtx,
+		currentMeta,
+		client.MergeFrom(cleanMeta),
+		patchOpts); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("error patching metadata: %w", err)
 	}
-	if err := r.client.Status().Patch(ctx, ctx.Object, client.MergeFrom(cleanObj)); err != nil && !apierrors.IsNotFound(err) {
+
+	if err := r.client.Status().Patch(
+		rootCtx,
+		ctx.Object,
+		client.MergeFrom(cleanObj)); err != nil && !apierrors.IsNotFound(err) {
 		return ctrl.Result{}, fmt.Errorf("error patching status: %w", err)
 	}
 
-	// condense all error messages into one
 	log.Info("Reconciliation complete")
 	return finalRes, utilerrors.NewAggregate(errs)
 }

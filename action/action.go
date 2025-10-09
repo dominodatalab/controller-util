@@ -75,7 +75,10 @@ func DeleteStorage(ctx *core.Context, opts []client.ListOption) error {
 	pvcList := &corev1.PersistentVolumeClaimList{}
 	listOpts := (&client.ListOptions{}).ApplyOptions(opts)
 
-	ctx.Log.Info("Querying for persistent volume claims", "namespace", listOpts.Namespace, "labels", listOpts.LabelSelector.String())
+	ctx.Log.Info(
+		"Querying for persistent volume claims",
+		"namespace", listOpts.Namespace, "labels",
+		listOpts.LabelSelector.String())
 	if err := ctx.Client.List(ctx, pvcList, opts...); err != nil {
 		ctx.Log.Error(err, "Cannot list persistent volume claims")
 		return err
@@ -95,7 +98,10 @@ func DeleteStorage(ctx *core.Context, opts []client.ListOption) error {
 	return nil
 }
 
-func createOwnedResource(ctx *core.Context, owner metav1.Object, controlled client.Object) (found client.Object, gvk schema.GroupVersionKind, err error) {
+func createOwnedResource(
+	ctx *core.Context,
+	owner metav1.Object,
+	controlled client.Object) (found client.Object, gvk schema.GroupVersionKind, err error) {
 	if err = ctrl.SetControllerReference(owner, controlled, ctx.Scheme); err != nil {
 		return
 	}

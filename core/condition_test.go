@@ -35,7 +35,7 @@ func NewMockObject(name string, generation int64) *MockConditionObject {
 	}
 }
 
-func TestConditionHelper_New(t *testing.T) {
+func TestConditionHelperNew(t *testing.T) {
 	obj := NewMockObject("test-object", 42)
 
 	helper := NewConditionHelper(obj)
@@ -44,7 +44,7 @@ func TestConditionHelper_New(t *testing.T) {
 	assert.Empty(t, helper.pending)
 }
 
-func TestConditionHelper_SetCondition(t *testing.T) {
+func TestConditionHelperSetCondition(t *testing.T) {
 	obj := NewMockObject("test-object", 42)
 	helper := NewConditionHelper(obj)
 
@@ -65,7 +65,7 @@ func TestConditionHelper_SetCondition(t *testing.T) {
 	assert.Equal(t, int64(42), helper.pending["TestCondition"].ObservedGeneration)
 }
 
-func TestConditionHelper_Set(t *testing.T) {
+func TestConditionHelperSet(t *testing.T) {
 	obj := NewMockObject("test-object", 42)
 	helper := NewConditionHelper(obj)
 
@@ -82,7 +82,7 @@ func TestConditionHelper_Set(t *testing.T) {
 	assert.Equal(t, int64(42), pendingCond.ObservedGeneration)
 }
 
-func TestConditionHelper_Setf(t *testing.T) {
+func TestConditionHelperSetf(t *testing.T) {
 	obj := NewMockObject("test-object", 42)
 	helper := NewConditionHelper(obj)
 
@@ -91,7 +91,7 @@ func TestConditionHelper_Setf(t *testing.T) {
 	assert.Equal(t, "Count: 5", helper.pending["TestCondition"].Message)
 }
 
-func TestConditionHelper_SetTrue(t *testing.T) {
+func TestConditionHelperSetTrue(t *testing.T) {
 	obj := NewMockObject("test-object", 1)
 	helper := NewConditionHelper(obj)
 
@@ -100,7 +100,7 @@ func TestConditionHelper_SetTrue(t *testing.T) {
 	assert.Equal(t, metav1.ConditionTrue, helper.pending["TestCondition"].Status)
 }
 
-func TestConditionHelper_SetFalse(t *testing.T) {
+func TestConditionHelperSetFalse(t *testing.T) {
 	obj := NewMockObject("test-object", 1)
 	helper := NewConditionHelper(obj)
 
@@ -109,7 +109,7 @@ func TestConditionHelper_SetFalse(t *testing.T) {
 	assert.Equal(t, metav1.ConditionFalse, helper.pending["TestCondition"].Status)
 }
 
-func TestConditionHelper_SetUnknown(t *testing.T) {
+func TestConditionHelperSetUnknown(t *testing.T) {
 	obj := NewMockObject("test-object", 1)
 	helper := NewConditionHelper(obj)
 
@@ -118,7 +118,7 @@ func TestConditionHelper_SetUnknown(t *testing.T) {
 	assert.Equal(t, metav1.ConditionUnknown, helper.pending["TestCondition"].Status)
 }
 
-func TestConditionHelper_SetfUnknown(t *testing.T) {
+func TestConditionHelperSetfUnknown(t *testing.T) {
 	obj := NewMockObject("test-object", 1)
 	helper := NewConditionHelper(obj)
 
@@ -128,7 +128,7 @@ func TestConditionHelper_SetfUnknown(t *testing.T) {
 	assert.Equal(t, "Status for resource is unknown", helper.pending["TestCondition"].Message)
 }
 
-func TestConditionHelper_Flush(t *testing.T) {
+func TestConditionHelperFlush(t *testing.T) {
 	obj := NewMockObject("test-object", 1)
 	helper := NewConditionHelper(obj)
 
@@ -160,7 +160,7 @@ func TestConditionHelper_Flush(t *testing.T) {
 	assert.Empty(t, helper.pending)
 }
 
-func TestConditionHelper_FlushNonConditionObject(t *testing.T) {
+func TestConditionHelperFlushNonConditionObject(t *testing.T) {
 	obj := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "v1",
@@ -458,26 +458,26 @@ func TestConditionReasonAndMessage(t *testing.T) {
 func TestConditionHelperSetFieldsExplicitly(t *testing.T) {
 	testCases := []struct {
 		name           string
-		helperFunc     func(*conditionHelper, string, string, string)
+		helperFunc     func(*ConditionHelper, string, string, string)
 		expectedStatus metav1.ConditionStatus
 	}{
 		{
 			name: "SetTrue",
-			helperFunc: func(h *conditionHelper, condType, reason, message string) {
+			helperFunc: func(h *ConditionHelper, condType, reason, message string) {
 				h.SetTrue(condType, reason, message)
 			},
 			expectedStatus: metav1.ConditionTrue,
 		},
 		{
 			name: "SetFalse",
-			helperFunc: func(h *conditionHelper, condType, reason, message string) {
+			helperFunc: func(h *ConditionHelper, condType, reason, message string) {
 				h.SetFalse(condType, reason, message)
 			},
 			expectedStatus: metav1.ConditionFalse,
 		},
 		{
 			name: "SetUnknown",
-			helperFunc: func(h *conditionHelper, condType, reason, message string) {
+			helperFunc: func(h *ConditionHelper, condType, reason, message string) {
 				h.SetUnknown(condType, reason, message)
 			},
 			expectedStatus: metav1.ConditionUnknown,

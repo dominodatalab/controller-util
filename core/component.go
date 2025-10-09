@@ -6,7 +6,7 @@ import (
 )
 
 type Component interface {
-	Reconcile(*Context) (ctrl.Result, error)
+	Reconcile(ctx *Context) (ctrl.Result, error)
 }
 
 type OwnedComponent interface {
@@ -15,9 +15,9 @@ type OwnedComponent interface {
 }
 
 type InitializerComponent interface {
-	Initialize(*Context, *ctrl.Builder) error
+	Initialize(ctx *Context, builder *ctrl.Builder) error
 }
 
 type FinalizerComponent interface {
-	Finalize(*Context) (ctrl.Result, bool, error)
+	Finalize(ctx *Context) (ctrl.Result, bool, error)
 }

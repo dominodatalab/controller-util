@@ -23,5 +23,5 @@ type Context struct {
 	Client     client.Client
 	Scheme     *runtime.Scheme
 	Recorder   record.EventRecorder
-	Conditions *conditionHelper
+	Conditions *ConditionHelper
 }

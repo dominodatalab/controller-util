@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -34,22 +33,18 @@ type reconcilerComponent struct {
 }
 
 type Reconciler struct {
-	name               string
-	resourceName       string
-	mgr                ctrl.Manager
-	controllerBuilder  *ctrl.Builder
-	apiType            client.Object
-	config             *rest.Config
-	client             client.Client
-	log                logr.Logger
-	abortNotFound      bool
-	webhooksEnabled    bool
-	webhookBuilder     *builder.WebhookBuilder
-	finalizerBaseName  string
-	verboseLogging     bool
-	withDefaulter      bool
-	withValidator      bool
-	defaultRetryPeriod time.Duration
+	name              string
+	resourceName      string
+	mgr               ctrl.Manager
+	controllerBuilder *ctrl.Builder
+	apiType           client.Object
+	config            *rest.Config
+	client            client.Client
+	log               logr.Logger
+	abortNotFound     bool
+	webhooksEnabled   bool
+	finalizerBaseName string
+	verboseLogging    bool
 
 	patcher     *Patch
 	recorder    record.EventRecorder
@@ -58,88 +53,16 @@ type Reconciler struct {
 	contextData ContextData
 }
 
-type Option func(*Reconciler)
-
-type ManagerOption struct {
-	Manager ctrl.Manager
-}
-
-func NewReconciler(managerOrOpts ...interface{}) *Reconciler {
-	r := &Reconciler{
-		components:         []*reconcilerComponent{},
-		contextData:        ContextData{},
-		abortNotFound:      true,
-		verboseLogging:     true,
-		webhooksEnabled:    false,
-		withDefaulter:      false,
-		withValidator:      false,
-		defaultRetryPeriod: 30 * time.Second,
-	}
-
-	if len(managerOrOpts) > 0 {
-		if mgr, ok := managerOrOpts[0].(ctrl.Manager); ok {
-			r.mgr = mgr
-			r.config = mgr.GetConfig()
-			r.client = mgr.GetClient()
-			r.controllerBuilder = builder.ControllerManagedBy(mgr)
-
-			for _, opt := range managerOrOpts[1:] {
-				if option, ok := opt.(Option); ok {
-					option(r)
-				}
-			}
-
-			return r
-		}
-	}
-
-	for _, opt := range managerOrOpts {
-		if option, ok := opt.(Option); ok {
-			option(r)
-		} else if managerOpt, ok := opt.(ManagerOption); ok {
-			r.mgr = managerOpt.Manager
-			r.config = managerOpt.Manager.GetConfig()
-			r.client = managerOpt.Manager.GetClient()
-			r.controllerBuilder = builder.ControllerManagedBy(managerOpt.Manager)
-		}
-	}
-
-	return r
-}
-
-func WithManager(mgr ctrl.Manager) Option {
-	return func(r *Reconciler) {
-		r.mgr = mgr
-		r.config = mgr.GetConfig()
-		r.client = mgr.GetClient()
-		r.controllerBuilder = builder.ControllerManagedBy(mgr)
-	}
-}
-
-func WithWebhookBuilder(builder *builder.WebhookBuilder) Option {
-	return func(r *Reconciler) {
-		r.webhookBuilder = builder
-	}
-}
-func (r *Reconciler) WithDefaulter(enable bool) *Reconciler {
-	r.withDefaulter = enable
-	return r
-}
-
-func (r *Reconciler) WithValidator(enable bool) *Reconciler {
-	r.withValidator = enable
-	return r
-}
-
-func WithRetryPeriod(period time.Duration) Option {
-	return func(r *Reconciler) {
-		r.defaultRetryPeriod = period
-	}
-}
-
-func WithVerboseLogging(verbose bool) Option {
-	return func(r *Reconciler) {
-		r.verboseLogging = verbose
+func NewReconciler(mgr ctrl.Manager) *Reconciler {
+	return &Reconciler{
+		mgr:               mgr,
+		config:            mgr.GetConfig(),
+		client:            mgr.GetClient(),
+		components:        []*reconcilerComponent{},
+		controllerBuilder: builder.ControllerManagedBy(mgr),
+		contextData:       ContextData{},
+		abortNotFound:     true,
+		verboseLogging:    true,
 	}
 }
 
@@ -263,22 +186,12 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 		return nil, fmt.Errorf("unable to build controller: %w", err)
 	}
 
+	// setup webhooks
 	if r.webhooksEnabled {
-		webhookBuilder := ctrl.NewWebhookManagedBy(r.mgr).For(r.apiType)
-
-		// If validator is enabled and a custom validator is available, explicitly set it
-		if r.withValidator {
-			r.log.Info("Validation webhook enabled for type", "type", fmt.Sprintf("%T", r.apiType))
-		}
-
-		err := webhookBuilder.Complete()
+		err := ctrl.NewWebhookManagedBy(r.mgr,r.apiType).Complete()
 		if err != nil {
 			return nil, fmt.Errorf("unable to build webhook: %w", err)
 		}
-
-		// Log webhook server information for debugging
-		r.log.Info("Webhook registered",
-			"webhookServer", r.mgr.GetWebhookServer() != nil)
 	}
 
 	return r.controller, nil

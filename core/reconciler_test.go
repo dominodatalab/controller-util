@@ -625,9 +625,6 @@ func TestReconciler_ReduceReconcileLogging(t *testing.T) {
 	mockComp.AssertExpectations(t)
 }
 
-func TestReconciler_InitializerComponent(t *testing.T) {
-	t.Skip("Skipping initializer test since we're not using Build() in the tests")
-}
 
 
 

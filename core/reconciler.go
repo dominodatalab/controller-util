@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,19 +33,29 @@ type reconcilerComponent struct {
 	finalizerName string
 }
 
+type Option func(*Reconciler)
+
+type ManagerOption struct {
+	Manager ctrl.Manager
+}
+
 type Reconciler struct {
-	name              string
-	resourceName      string
-	mgr               ctrl.Manager
-	controllerBuilder *ctrl.Builder
-	apiType           client.Object
-	config            *rest.Config
-	client            client.Client
-	log               logr.Logger
-	abortNotFound     bool
-	webhooksEnabled   bool
-	finalizerBaseName string
-	verboseLogging    bool
+	name               string
+	resourceName       string
+	mgr                ctrl.Manager
+	controllerBuilder  *ctrl.Builder
+	apiType            client.Object
+	config             *rest.Config
+	client             client.Client
+	log                logr.Logger
+	abortNotFound      bool
+	webhooksEnabled    bool
+	webhookBuilder     *builder.WebhookBuilder[client.Object]
+	finalizerBaseName  string
+	verboseLogging     bool
+	withDefaulter      bool
+	withValidator      bool
+	defaultRetryPeriod time.Duration
 
 	patcher     *Patch
 	recorder    record.EventRecorder
@@ -53,17 +64,84 @@ type Reconciler struct {
 	contextData ContextData
 }
 
-func NewReconciler(mgr ctrl.Manager) *Reconciler {
-	return &Reconciler{
-		mgr:               mgr,
-		config:            mgr.GetConfig(),
-		client:            mgr.GetClient(),
-		components:        []*reconcilerComponent{},
-		controllerBuilder: builder.ControllerManagedBy(mgr),
-		contextData:       ContextData{},
-		abortNotFound:     true,
-		verboseLogging:    true,
+func NewReconciler(managerOrOpts ...interface{}) *Reconciler {
+	r := &Reconciler{
+		components:         []*reconcilerComponent{},
+		contextData:        ContextData{},
+		abortNotFound:      true,
+		verboseLogging:     true,
+		webhooksEnabled:    false,
+		withDefaulter:      false,
+		withValidator:      false,
+		defaultRetryPeriod: 30 * time.Second,
 	}
+
+	if len(managerOrOpts) > 0 {
+		if mgr, ok := managerOrOpts[0].(ctrl.Manager); ok {
+			r.mgr = mgr
+			r.config = mgr.GetConfig()
+			r.client = mgr.GetClient()
+			r.controllerBuilder = builder.ControllerManagedBy(mgr)
+
+			for _, opt := range managerOrOpts[1:] {
+				if option, ok := opt.(Option); ok {
+					option(r)
+				}
+			}
+
+			return r
+		}
+	}
+
+	for _, opt := range managerOrOpts {
+		if option, ok := opt.(Option); ok {
+			option(r)
+		} else if managerOpt, ok := opt.(ManagerOption); ok {
+			r.mgr = managerOpt.Manager
+			r.config = managerOpt.Manager.GetConfig()
+			r.client = managerOpt.Manager.GetClient()
+			r.controllerBuilder = builder.ControllerManagedBy(managerOpt.Manager)
+		}
+	}
+
+	return r
+}
+
+func WithManager(mgr ctrl.Manager) Option {
+	return func(r *Reconciler) {
+		r.mgr = mgr
+		r.config = mgr.GetConfig()
+		r.client = mgr.GetClient()
+		r.controllerBuilder = builder.ControllerManagedBy(mgr)
+	}
+}
+
+func WithWebhookBuilder(wb *builder.WebhookBuilder[client.Object]) Option {
+	return func(r *Reconciler) {
+		r.webhookBuilder = wb
+	}
+}
+
+func WithRetryPeriod(period time.Duration) Option {
+	return func(r *Reconciler) {
+		r.defaultRetryPeriod = period
+	}
+}
+
+func WithVerboseLogging(verbose bool) Option {
+	return func(r *Reconciler) {
+		r.verboseLogging = verbose
+	}
+}
+
+func (r *Reconciler) WithDefaulter(enable bool) *Reconciler {
+	r.withDefaulter = enable
+	return r
+}
+
+func (r *Reconciler) WithValidator(enable bool) *Reconciler {
+	r.withValidator = enable
+	return r
 }
 
 func (r *Reconciler) For(apiType client.Object, opts ...builder.ForOption) *Reconciler {
@@ -188,7 +266,7 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 
 	// setup webhooks
 	if r.webhooksEnabled {
-		err := ctrl.NewWebhookManagedBy(r.mgr,r.apiType).Complete()
+		err := ctrl.NewWebhookManagedBy(r.mgr, r.apiType).Complete()
 		if err != nil {
 			return nil, fmt.Errorf("unable to build webhook: %w", err)
 		}

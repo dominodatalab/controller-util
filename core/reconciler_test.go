@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -119,12 +120,13 @@ func (m *MockManager) Add(r manager.Runnable) error {
 }
 
 func setupTest(t *testing.T) (client.Client, *runtime.Scheme) {
+	t.Helper()
 	s := runtime.NewScheme()
 	require.NoError(t, scheme.AddToScheme(s))
 	require.NoError(t, appsv1.AddToScheme(s))
 
-	client := fake.NewClientBuilder().WithScheme(s).Build()
-	return client, s
+	cl := fake.NewClientBuilder().WithScheme(s).Build()
+	return cl, s
 }
 
 func createTestDeployment(name, namespace string) *appsv1.Deployment {
@@ -159,6 +161,32 @@ func createTestDeployment(name, namespace string) *appsv1.Deployment {
 	}
 }
 
+func setupReconciler(t *testing.T, mgr *MockManager, obj client.Object, components map[string]Component) *Reconciler {
+	t.Helper()
+	r := NewReconciler(mgr).For(obj).Named("test-reconciler")
+	for name, comp := range components {
+		r.Component(name, comp)
+	}
+	r.name = "test-reconciler"
+	r.resourceName = "deployment"
+	r.patcher = NewPatch(schema.GroupVersionKind{
+		Group:   "apps",
+		Version: "v1",
+		Kind:    "Deployment",
+	})
+	r.log = mgr.GetLogger().WithName("test-reconciler")
+	return r
+}
+
+func reconcileRequest(name, namespace string) reconcile.Request {
+	return reconcile.Request{
+		NamespacedName: types.NamespacedName{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+}
+
 func TestReconciler_Basic(t *testing.T) {
 	cl, s := setupTest(t)
 
@@ -171,28 +199,9 @@ func TestReconciler_Basic(t *testing.T) {
 	expectedResult := ctrl.Result{Requeue: true}
 	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(expectedResult, nil)
 
-	r := NewReconciler(mgr).
-		For(deploy).
-		Component("test-component", mockComp).
-		Named("test-reconciler")
+	r := setupReconciler(t, mgr, deploy, map[string]Component{"test-component": mockComp})
 
-	r.name = "test-reconciler"
-	r.resourceName = "deployment"
-	r.patcher = NewPatch(schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "Deployment",
-	})
-	r.log = mgr.GetLogger().WithName("test-reconciler")
-
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.NoError(t, err)
 	assert.Equal(t, expectedResult, res)
@@ -231,14 +240,7 @@ func TestReconciler_MultipleComponents(t *testing.T) {
 	})
 	r.log = mgr.GetLogger().WithName("test-reconciler")
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.NoError(t, err)
 	assert.True(t, res.Requeue)
@@ -247,16 +249,24 @@ func TestReconciler_MultipleComponents(t *testing.T) {
 	mockComp2.AssertExpectations(t)
 }
 
-func TestReconciler_NotFound(t *testing.T) {
+func TestReconciler_ResultAggregation_ShortestRequeueAfter(t *testing.T) {
 	cl, s := setupTest(t)
+
+	deploy := createTestDeployment("test-deployment", "default")
+	require.NoError(t, cl.Create(context.Background(), deploy))
 
 	mgr := NewMockManager(cl, s, testr.New(t))
 
-	mockComp := new(MockComponent)
+	mockComp1 := new(MockComponent)
+	mockComp2 := new(MockComponent)
+
+	mockComp1.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{RequeueAfter: 10 * time.Minute}, nil)
+	mockComp2.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{RequeueAfter: 2 * time.Minute}, nil)
 
 	r := NewReconciler(mgr).
-		For(&appsv1.Deployment{}).
-		Component("test-component", mockComp).
+		For(deploy).
+		Component("component1", mockComp1).
+		Component("component2", mockComp2).
 		Named("test-reconciler")
 
 	r.name = "test-reconciler"
@@ -268,24 +278,42 @@ func TestReconciler_NotFound(t *testing.T) {
 	})
 	r.log = mgr.GetLogger().WithName("test-reconciler")
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "non-existent",
-			Namespace: "default",
-		},
-	}
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
-	res, err := r.Reconcile(context.Background(), req)
+	assert.NoError(t, err)
+	assert.Equal(t, 2*time.Minute, res.RequeueAfter)
+	mockComp1.AssertExpectations(t)
+	mockComp2.AssertExpectations(t)
+}
+
+func TestReconciler_NotFound(t *testing.T) {
+	cl, s := setupTest(t)
+
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	mockComp := new(MockComponent)
+
+	r := setupReconciler(t, mgr, &appsv1.Deployment{}, map[string]Component{"test-component": mockComp})
+
+	res, err := r.Reconcile(context.Background(), reconcileRequest("non-existent", "default"))
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
 	mockComp.AssertNotCalled(t, "Reconcile")
+}
 
-	r.ReconcileNotFound()
+func TestReconciler_ReconcileNotFound_ComponentCalled(t *testing.T) {
+	cl, s := setupTest(t)
 
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	mockComp := new(MockComponent)
 	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, nil)
 
-	res, err = r.Reconcile(context.Background(), req)
+	r := setupReconciler(t, mgr, &appsv1.Deployment{}, map[string]Component{"test-component": mockComp})
+	r.ReconcileNotFound()
+
+	res, err := r.Reconcile(context.Background(), reconcileRequest("non-existent", "default"))
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
@@ -305,32 +333,36 @@ func TestReconciler_SkipReconcile(t *testing.T) {
 
 	mockComp := new(MockComponent)
 
-	r := NewReconciler(mgr).
-		For(deploy).
-		Component("test-component", mockComp).
-		Named("test-reconciler")
+	r := setupReconciler(t, mgr, deploy, map[string]Component{"test-component": mockComp})
 
-	r.name = "test-reconciler"
-	r.resourceName = "deployment"
-	r.patcher = NewPatch(schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "Deployment",
-	})
-	r.log = mgr.GetLogger().WithName("test-reconciler")
-
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
 	mockComp.AssertNotCalled(t, "Reconcile")
+}
+
+func TestReconciler_SkipReconcile_NonTrueValue(t *testing.T) {
+	cl, s := setupTest(t)
+
+	deploy := createTestDeployment("test-deployment", "default")
+	deploy.Annotations = map[string]string{
+		SkipReconcileAnnotation: "false",
+	}
+	require.NoError(t, cl.Create(context.Background(), deploy))
+
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	mockComp := new(MockComponent)
+	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, nil)
+
+	r := setupReconciler(t, mgr, deploy, map[string]Component{"test-component": mockComp})
+
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, res)
+	mockComp.AssertExpectations(t)
 }
 
 func TestReconciler_OwnedComponent(t *testing.T) {
@@ -377,14 +409,7 @@ func TestReconciler_OwnedComponent(t *testing.T) {
 	})
 	r.log = mgr.GetLogger().WithName("test-reconciler")
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
@@ -399,39 +424,18 @@ func TestReconciler_FinalizerComponent(t *testing.T) {
 
 	mgr := NewMockManager(cl, s, testr.New(t))
 
-	mockFinComp1 := new(MockFinalizerComponent)
+	mockFinComp := new(MockFinalizerComponent)
+	mockFinComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, nil)
 
-	mockFinComp1.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, nil)
-
-	r := NewReconciler(mgr).
-		For(&appsv1.Deployment{}).
-		Component("finalizer-component", mockFinComp1).
-		Named("test-reconciler")
-
-	r.name = "test-reconciler"
-	r.resourceName = "deployment"
-	r.patcher = NewPatch(schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "Deployment",
-	})
-	r.log = mgr.GetLogger().WithName("test-reconciler")
-
-	r.components[0].finalizer = mockFinComp1
+	r := setupReconciler(t, mgr, &appsv1.Deployment{}, map[string]Component{"finalizer-component": mockFinComp})
+	r.components[0].finalizer = mockFinComp
 	r.components[0].finalizerName = "test-reconciler.apps/finalizer-component"
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, res)
-	mockFinComp1.AssertExpectations(t)
+	mockFinComp.AssertExpectations(t)
 
 	updatedDeploy := &appsv1.Deployment{}
 	err = cl.Get(context.Background(), types.NamespacedName{
@@ -439,7 +443,74 @@ func TestReconciler_FinalizerComponent(t *testing.T) {
 	}, updatedDeploy)
 	assert.NoError(t, err)
 	assert.Contains(t, updatedDeploy.Finalizers, "test-reconciler.apps/finalizer-component")
+}
 
+func TestReconciler_FinalizerComponent_Deletion(t *testing.T) {
+	cl, s := setupTest(t)
+
+	deploy := createTestDeployment("test-deployment", "default")
+	deploy.Finalizers = []string{"test-reconciler.apps/finalizer-component"}
+	require.NoError(t, cl.Create(context.Background(), deploy))
+
+	// deleting an object with finalizers sets DeletionTimestamp without removing it
+	require.NoError(t, cl.Delete(context.Background(), deploy))
+
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	mockFinComp := new(MockFinalizerComponent)
+	mockFinComp.On("Finalize", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, true, nil)
+
+	r := setupReconciler(t, mgr, &appsv1.Deployment{}, map[string]Component{"finalizer-component": mockFinComp})
+	r.components[0].finalizer = mockFinComp
+	r.components[0].finalizerName = "test-reconciler.apps/finalizer-component"
+
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, res)
+	mockFinComp.AssertExpectations(t)
+	mockFinComp.AssertNotCalled(t, "Reconcile")
+
+	// once all finalizers are removed from an object with a DeletionTimestamp,
+	// the fake client garbage collects it — not found is the expected outcome
+	updatedDeploy := &appsv1.Deployment{}
+	err = cl.Get(context.Background(), types.NamespacedName{
+		Name: "test-deployment", Namespace: "default",
+	}, updatedDeploy)
+	assert.True(t, apierrors.IsNotFound(err), "expected object to be gone after finalizer removal, got: %v", err)
+}
+
+func TestReconciler_FinalizerComponent_NotDone(t *testing.T) {
+	cl, s := setupTest(t)
+
+	deploy := createTestDeployment("test-deployment", "default")
+	deploy.Finalizers = []string{"test-reconciler.apps/finalizer-component"}
+	require.NoError(t, cl.Create(context.Background(), deploy))
+
+	// deleting an object with finalizers sets DeletionTimestamp without removing it
+	require.NoError(t, cl.Delete(context.Background(), deploy))
+
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	mockFinComp := new(MockFinalizerComponent)
+	mockFinComp.On("Finalize", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{RequeueAfter: 5 * time.Second}, false, nil)
+
+	r := setupReconciler(t, mgr, &appsv1.Deployment{}, map[string]Component{"finalizer-component": mockFinComp})
+	r.components[0].finalizer = mockFinComp
+	r.components[0].finalizerName = "test-reconciler.apps/finalizer-component"
+
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
+
+	assert.NoError(t, err)
+	assert.Equal(t, 5*time.Second, res.RequeueAfter)
+	mockFinComp.AssertExpectations(t)
+
+	updatedDeploy := &appsv1.Deployment{}
+	err = cl.Get(context.Background(), types.NamespacedName{
+		Name: "test-deployment", Namespace: "default",
+	}, updatedDeploy)
+	assert.NoError(t, err)
+	assert.Contains(t, updatedDeploy.Finalizers, "test-reconciler.apps/finalizer-component")
 }
 
 func TestReconciler_ComponentError(t *testing.T) {
@@ -454,28 +525,9 @@ func TestReconciler_ComponentError(t *testing.T) {
 	testErr := errors.New("reconcile error")
 	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, testErr)
 
-	r := NewReconciler(mgr).
-		For(deploy).
-		Component("error-component", mockComp).
-		Named("test-reconciler")
+	r := setupReconciler(t, mgr, deploy, map[string]Component{"error-component": mockComp})
 
-	r.name = "test-reconciler"
-	r.resourceName = "deployment"
-	r.patcher = NewPatch(schema.GroupVersionKind{
-		Group:   "apps",
-		Version: "v1",
-		Kind:    "Deployment",
-	})
-	r.log = mgr.GetLogger().WithName("test-reconciler")
-
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "reconcile error")
@@ -515,14 +567,7 @@ func TestReconciler_MultipleComponentErrors(t *testing.T) {
 	})
 	r.log = mgr.GetLogger().WithName("test-reconciler")
 
-	req := reconcile.Request{
-		NamespacedName: types.NamespacedName{
-			Name:      "test-deployment",
-			Namespace: "default",
-		},
-	}
-
-	res, err := r.Reconcile(context.Background(), req)
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "error from component 1")
@@ -532,82 +577,74 @@ func TestReconciler_MultipleComponentErrors(t *testing.T) {
 	mockComp2.AssertExpectations(t)
 }
 
-func TestReconciler_InitializerComponent(t *testing.T) {
-	t.Skip("Skipping initializer test since we're not using Build() in the tests")
+func TestReconciler_WithContextData(t *testing.T) {
+	cl, s := setupTest(t)
+
+	deploy := createTestDeployment("test-deployment", "default")
+	require.NoError(t, cl.Create(context.Background(), deploy))
+
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	var capturedCtx *Context
+	mockComp := new(MockComponent)
+	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).
+		Run(func(args mock.Arguments) {
+			capturedCtx = args.Get(0).(*Context)
+		}).
+		Return(ctrl.Result{}, nil)
+
+	r := setupReconciler(t, mgr, deploy, map[string]Component{"test-component": mockComp})
+	r.contextData["my-key"] = "my-value"
+
+	_, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
+
+	assert.NoError(t, err)
+	require.NotNil(t, capturedCtx)
+	assert.Equal(t, "my-value", capturedCtx.Data["my-key"])
+	mockComp.AssertExpectations(t)
 }
 
-func TestWithDefaulterTrue(t *testing.T) {
-	// Setup fake manager
-	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+func TestReconciler_ReduceReconcileLogging(t *testing.T) {
+	cl, s := setupTest(t)
 
-	// Create reconciler with option
-	r := NewReconciler(mgr).WithDefaulter(true)
+	deploy := createTestDeployment("test-deployment", "default")
+	require.NoError(t, cl.Create(context.Background(), deploy))
 
-	// Assert option was applied correctly
-	assert.True(t, r.withDefaulter, "withDefaulter should be true")
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	mockComp := new(MockComponent)
+	mockComp.On("Reconcile", mock.AnythingOfType("*core.Context")).Return(ctrl.Result{}, nil)
+
+	r := setupReconciler(t, mgr, deploy, map[string]Component{"test-component": mockComp})
+	r.ReduceReconcileLogging()
+
+	res, err := r.Reconcile(context.Background(), reconcileRequest("test-deployment", "default"))
+
+	assert.NoError(t, err)
+	assert.Equal(t, ctrl.Result{}, res)
+	mockComp.AssertExpectations(t)
 }
 
-func TestWithDefaulterFalse(t *testing.T) {
-	// Setup fake manager
-	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
 
-	// Create reconciler with option explicitly set to false
-	r := NewReconciler(mgr).WithDefaulter(false)
 
-	// Assert option was applied correctly
-	assert.False(t, r.withDefaulter, "withDefaulter should be false")
+
+func TestReconciler_WithWebhooks_SetsFlag(t *testing.T) {
+	cl, s := setupTest(t)
+	mgr := NewMockManager(cl, s, testr.New(t))
+
+	r := NewReconciler(mgr).
+		For(&appsv1.Deployment{}).
+		WithWebhooks()
+
+	assert.True(t, r.webhooksEnabled)
 }
 
-func TestWithValidatorTrue(t *testing.T) {
-	// Setup fake manager
-	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
+func TestReconciler_WithoutWebhooks_FlagNotSet(t *testing.T) {
+	cl, s := setupTest(t)
+	mgr := NewMockManager(cl, s, testr.New(t))
 
-	// Create reconciler with option
-	r := NewReconciler(mgr).WithValidator(true)
+	r := NewReconciler(mgr).
+		For(&appsv1.Deployment{})
 
-	// Assert option was applied correctly
-	assert.True(t, r.withValidator, "withValidator should be true")
-}
-
-func TestWithValidatorFalse(t *testing.T) {
-	// Setup fake manager
-	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
-
-	// Create reconciler with option explicitly set to false
-	r := NewReconciler(mgr).WithValidator(false)
-
-	// Assert option was applied correctly
-	assert.False(t, r.withValidator, "withValidator should be false")
-}
-
-func TestWithRetryPeriod(t *testing.T) {
-	// Setup fake manager
-	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
-
-	// Define custom retry period
-	customPeriod := 30 * time.Second
-
-	// Create reconciler with option
-	r := NewReconciler(mgr, WithRetryPeriod(customPeriod))
-
-	// Assert option was applied correctly
-	assert.Equal(t, customPeriod, r.defaultRetryPeriod, "defaultRetryPeriod should match the provided value")
-}
-
-func TestMultipleOptions(t *testing.T) {
-	// Setup fake manager
-	mgr, _ := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{})
-
-	// Create reconciler with multiple options
-	r := NewReconciler(
-		mgr,
-		WithRetryPeriod(45*time.Second),
-	).
-		WithDefaulter(true).
-		WithValidator(true)
-
-	// Assert all options were applied correctly
-	assert.True(t, r.withDefaulter, "withDefaulter should be true")
-	assert.True(t, r.withValidator, "withValidator should be true")
-	assert.Equal(t, 45*time.Second, r.defaultRetryPeriod, "defaultRetryPeriod should be 45 seconds")
+	assert.False(t, r.webhooksEnabled)
 }

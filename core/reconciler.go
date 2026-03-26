@@ -33,6 +33,12 @@ type reconcilerComponent struct {
 	finalizerName string
 }
 
+type Option func(*Reconciler)
+
+type ManagerOption struct {
+	Manager ctrl.Manager
+}
+
 type Reconciler struct {
 	name               string
 	resourceName       string
@@ -44,7 +50,7 @@ type Reconciler struct {
 	log                logr.Logger
 	abortNotFound      bool
 	webhooksEnabled    bool
-	webhookBuilder     *builder.WebhookBuilder
+	webhookBuilder     *builder.WebhookBuilder[client.Object]
 	finalizerBaseName  string
 	verboseLogging     bool
 	withDefaulter      bool
@@ -56,12 +62,6 @@ type Reconciler struct {
 	controller  controller.Controller
 	components  []*reconcilerComponent
 	contextData ContextData
-}
-
-type Option func(*Reconciler)
-
-type ManagerOption struct {
-	Manager ctrl.Manager
 }
 
 func NewReconciler(managerOrOpts ...interface{}) *Reconciler {
@@ -116,19 +116,10 @@ func WithManager(mgr ctrl.Manager) Option {
 	}
 }
 
-func WithWebhookBuilder(builder *builder.WebhookBuilder) Option {
+func WithWebhookBuilder(wb *builder.WebhookBuilder[client.Object]) Option {
 	return func(r *Reconciler) {
-		r.webhookBuilder = builder
+		r.webhookBuilder = wb
 	}
-}
-func (r *Reconciler) WithDefaulter(enable bool) *Reconciler {
-	r.withDefaulter = enable
-	return r
-}
-
-func (r *Reconciler) WithValidator(enable bool) *Reconciler {
-	r.withValidator = enable
-	return r
 }
 
 func WithRetryPeriod(period time.Duration) Option {
@@ -141,6 +132,16 @@ func WithVerboseLogging(verbose bool) Option {
 	return func(r *Reconciler) {
 		r.verboseLogging = verbose
 	}
+}
+
+func (r *Reconciler) WithDefaulter(enable bool) *Reconciler {
+	r.withDefaulter = enable
+	return r
+}
+
+func (r *Reconciler) WithValidator(enable bool) *Reconciler {
+	r.withValidator = enable
+	return r
 }
 
 func (r *Reconciler) For(apiType client.Object, opts ...builder.ForOption) *Reconciler {
@@ -263,22 +264,12 @@ func (r *Reconciler) Build() (controller.Controller, error) {
 		return nil, fmt.Errorf("unable to build controller: %w", err)
 	}
 
+	// setup webhooks
 	if r.webhooksEnabled {
-		webhookBuilder := ctrl.NewWebhookManagedBy(r.mgr).For(r.apiType)
-
-		// If validator is enabled and a custom validator is available, explicitly set it
-		if r.withValidator {
-			r.log.Info("Validation webhook enabled for type", "type", fmt.Sprintf("%T", r.apiType))
-		}
-
-		err := webhookBuilder.Complete()
+		err := ctrl.NewWebhookManagedBy(r.mgr, r.apiType).Complete()
 		if err != nil {
 			return nil, fmt.Errorf("unable to build webhook: %w", err)
 		}
-
-		// Log webhook server information for debugging
-		r.log.Info("Webhook registered",
-			"webhookServer", r.mgr.GetWebhookServer() != nil)
 	}
 
 	return r.controller, nil
